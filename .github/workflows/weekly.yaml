@@ -1,0 +1,55 @@
+name: Weekly aria2 Build
+on:
+  schedule:
+    - cron: '0 0 * * 0' # 每周日 UTC 时间 00:00 运行
+  workflow_dispatch:
+permissions:
+  contents: write # 必需的上传权限
+jobs:
+  process-aria2:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Get latest aria2 tag
+        id: get-tag
+        shell: bash
+        run: |
+          TAG=$(curl -s https://api.github.com/repos/aria2/aria2/releases/latest | jq -r '.tag_name')
+          TAG_VER=$(echo "$TAG" | sed 's/release-//')
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "tag_ver=${TAG_VER}" >> $GITHUB_OUTPUT
+      - name: Download binaries
+        shell: bash
+        run: |
+          curl -L -o 32bit.zip "https://github.com/aria2/aria2/releases/download/${{ steps.get-tag.outputs.tag }}/aria2-${{ steps.get-tag.outputs.tag_ver }}-win-32bit-build1.zip"
+          curl -L -o 64bit.zip "https://github.com/aria2/aria2/releases/download/${{ steps.get-tag.outputs.tag }}/aria2-${{ steps.get-tag.outputs.tag_ver }}-win-64bit-build1.zip"
+      - name: Extract archives
+        shell: powershell
+        run: |
+          Expand-Archive -Path 32bit.zip -DestinationPath .
+          Expand-Archive -Path 64bit.zip -DestinationPath .
+          Remove-Item 32bit.zip, 64bit.zip
+      - name: Download genpeimg
+        shell: powershell
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/mokurin000/genpeimg/releases/latest/download/genpeimg-amd64.exe" -OutFile "genpeimg.exe"
+      - name: Modify PE headers
+        shell: powershell
+        run: |
+          .\genpeimg.exe -s WINDOWS "aria2-${{ steps.get-tag.outputs.tag_ver }}-win-32bit-build1/aria2c.exe"
+          .\genpeimg.exe -s WINDOWS "aria2-${{ steps.get-tag.outputs.tag_ver }}-win-64bit-build1/aria2c.exe"
+      - name: Repackage binaries
+        shell: powershell
+        run: |
+          Compress-Archive -Path "aria2-${{ steps.get-tag.outputs.tag_ver }}-win-32bit-build1" -DestinationPath "aria2-${{ steps.get-tag.outputs.tag_ver }}-win-32bit-build1.zip" -Force
+          Compress-Archive -Path "aria2-${{ steps.get-tag.outputs.tag_ver }}-win-64bit-build1" -DestinationPath "aria2-${{ steps.get-tag.outputs.tag_ver }}-win-64bit-build1.zip" -Force
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get-tag.outputs.tag }} # 使用官方相同的 tag
+          files: | # 要上传的文件列表
+            aria2-${{ steps.get-tag.outputs.tag_ver }}-win-32bit-build1.zip
+            aria2-${{ steps.get-tag.outputs.tag_ver }}-win-64bit-build1.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
